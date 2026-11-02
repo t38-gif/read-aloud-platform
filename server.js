@@ -6,10 +6,10 @@ const fs = require('fs');
 
 const app = express();
 
-// 初始化 SQLite 数据库
+// Initialize SQLite database
 const db = new sqlite3.Database('./read_aloud.db');
 
-// 自动创建数据库表（如果不存在）
+// Automatically create database tables on startup if they don't exist
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS students (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,7 +25,7 @@ db.serialize(() => {
     )`);
 });
 
-// 配置文件上传路径
+// Upload directory configuration
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir);
@@ -40,13 +40,12 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// 中间件设置
+// Express Middleware
 app.use(express.json());
-// 托管 public 文件夹内的静态页面 (index.html)
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// 计算当前 ISO 周数辅助函数
+// Helper: Calculate ISO Week Number
 function getISOWeek(date = new Date()) {
     const tmpDate = new Date(date.getTime());
     tmpDate.setHours(0, 0, 0, 0);
@@ -55,11 +54,11 @@ function getISOWeek(date = new Date()) {
     return 1 + Math.round(((tmpDate.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
-// API: 处理学生音频上传
+// API Endpoint: Student Audio Upload
 app.post('/api/upload', upload.single('audio'), (req, res) => {
     const { student_id } = req.body;
     if (!req.file) {
-        return res.status(400).json({ error: '没有接收到音频文件' });
+        return res.status(400).json({ error: 'No audio file received' });
     }
 
     const audio_file_path = req.file.path;
@@ -72,7 +71,12 @@ app.post('/api/upload', upload.single('audio'), (req, res) => {
         [student_id, audio_file_path, week_number, year],
         function (err) {
             if (err) return res.status(500).json({ error: err.message });
-// API: Get Progress Tracked Directly From Submissions
+            res.json({ success: true, submission_id: this.lastID });
+        }
+    );
+});
+
+// API Endpoint: Automated Weekly Progress Monitoring for Teachers
 app.get('/api/progress', (req, res) => {
     const currentWeek = getISOWeek();
     const currentYear = new Date().getFullYear();
@@ -92,14 +96,7 @@ app.get('/api/progress', (req, res) => {
         res.json({ week: currentWeek, year: currentYear, progress: rows });
     });
 });
-    `;
 
-    db.all(query, [currentWeek, currentYear], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ week: currentWeek, year: currentYear, progress: rows });
-    });
-});
-
-// 适配 Render 的动态端口设置
+// Dynamic Port Assignment for Render Deployment
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
