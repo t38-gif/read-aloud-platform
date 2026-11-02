@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HKDSE Student Read-Aloud Recorder</title>
+    <title>HKDSE Student Read-Aloud Portal</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 450px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
+        body { font-family: Arial, sans-serif; max-width: 480px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
         .card { background: white; border: 1px solid #cbd5e0; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
         h2 { color: #1b365d; text-align: center; margin-top: 0; }
         label { font-weight: bold; color: #4a5568; }
@@ -17,6 +17,8 @@
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         #status { text-align: center; font-weight: bold; margin-top: 15px; color: #2d3748; }
         audio { width: 100%; margin-top: 15px; }
+        .score-box { display: none; margin-top: 20px; padding: 15px; background: #ebf8ff; border: 2px solid #3182ce; border-radius: 8px; text-align: center; }
+        .score-number { font-size: 36px; font-weight: bold; color: #2b6cb0; margin: 5px 0; }
     </style>
 </head>
 <body>
@@ -32,6 +34,12 @@
         <button id="uploadBtn" class="btn-submit" disabled>⬆️ Submit Soundtrack</button>
 
         <p id="status"></p>
+
+        <div id="scoreBox" class="score-box">
+            <div>🎯 Instant Pronunciation & Intonation Score:</div>
+            <div id="scoreDisplay" class="score-number">0 / 100</div>
+            <small style="color: #4a5568;">Evaluated on Accent Clarity & Fluency</small>
+        </div>
     </div>
 
     <script>
@@ -42,6 +50,8 @@
         const uploadBtn = document.getElementById('uploadBtn');
         const status = document.getElementById('status');
         const audioPreview = document.getElementById('audioPreview');
+        const scoreBox = document.getElementById('scoreBox');
+        const scoreDisplay = document.getElementById('scoreDisplay');
 
         startBtn.onclick = async () => {
             try {
@@ -58,6 +68,7 @@
 
                 mediaRecorder.start();
                 status.textContent = '🎙️ Recording audio now... Speak clearly!';
+                scoreBox.style.display = 'none';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
             } catch (err) {
@@ -67,7 +78,7 @@
 
         stopBtn.onclick = () => {
             mediaRecorder.stop();
-            status.textContent = '⏹️ Recording finished. Play audio to check before uploading.';
+            status.textContent = '⏹️ Recording finished. Preview below before submitting.';
             startBtn.disabled = false;
             stopBtn.disabled = true;
         };
@@ -80,16 +91,18 @@
             formData.append('student_id', studentId);
             formData.append('audio', audioBlob);
 
-            status.textContent = '⏳ Uploading your audio...';
+            status.textContent = '⏳ Analyzing audio & calculating score...';
             try {
                 const res = await fetch('/api/upload', { method: 'POST', body: formData });
                 const data = await res.json();
 
                 if (data.success) {
-                    status.textContent = '✅ Submitted successfully! Good job!';
+                    status.textContent = '✅ Submitted & Scored Successfully!';
+                    scoreDisplay.textContent = `${data.score} / 100`;
+                    scoreBox.style.display = 'block';
                     uploadBtn.disabled = true;
                 } else {
-                    status.textContent = '❌ Upload failed. Please try again.';
+                    status.textContent = '❌ Upload failed. Try again.';
                 }
             } catch (e) {
                 status.textContent = '❌ Upload failed. Connection error.';
