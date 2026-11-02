@@ -72,28 +72,26 @@ app.post('/api/upload', upload.single('audio'), (req, res) => {
         [student_id, audio_file_path, week_number, year],
         function (err) {
             if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true, submission_id: this.lastID });
-        }
-    );
-});
-
-// API: 获取学生本周提交进度
+// API: Get Progress Tracked Directly From Submissions
 app.get('/api/progress', (req, res) => {
     const currentWeek = getISOWeek();
     const currentYear = new Date().getFullYear();
 
     const query = `
         SELECT 
-            s.id AS student_id,
-            s.name,
-            COUNT(sub.id) AS weekly_count,
-            CASE WHEN COUNT(sub.id) >= 4 THEN 'Completed' ELSE 'Pending' END AS status
-        FROM students s
-        LEFT JOIN submissions sub 
-            ON s.id = sub.student_id 
-            AND sub.week_number = ? 
-            AND sub.year = ?
-        GROUP BY s.id
+            student_id,
+            COUNT(id) AS weekly_count,
+            CASE WHEN COUNT(id) >= 4 THEN 'Completed' ELSE 'Pending' END AS status
+        FROM submissions
+        WHERE week_number = ? AND year = ?
+        GROUP BY student_id
+    `;
+
+    db.all(query, [currentWeek, currentYear], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ week: currentWeek, year: currentYear, progress: rows });
+    });
+});
     `;
 
     db.all(query, [currentWeek, currentYear], (err, rows) => {
