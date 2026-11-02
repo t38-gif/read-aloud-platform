@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HKDSE Student Read-Aloud Recorder</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 450px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
+        .card { background: white; border: 1px solid #cbd5e0; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        h2 { color: #1b365d; text-align: center; margin-top: 0; }
+        label { font-weight: bold; color: #4a5568; }
+        input { width: 100%; padding: 10px; margin: 8px 0 16px 0; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; margin: 6px 0; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 15px; }
+        .btn-start { background-color: #e53e3e; color: white; }
+        .btn-stop { background-color: #718096; color: white; }
+        .btn-submit { background-color: #2b6cb0; color: white; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #status { text-align: center; font-weight: bold; margin-top: 15px; color: #2d3748; }
+        audio { width: 100%; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>🎙️ Student Read-Aloud Portal</h2>
+        <label for="studentId">Enter Student ID / Number:</label>
+        <input type="number" id="studentId" placeholder="e.g. 101" required>
+
+        <button id="startBtn" class="btn-start">🔴 Start Recording</button>
+        <button id="stopBtn" class="btn-stop" disabled>⏹️ Stop Recording</button>
+        <audio id="audioPreview" controls></audio>
+        
+        <button id="uploadBtn" class="btn-submit" disabled>⬆️ Submit Soundtrack</button>
+
+        <p id="status"></p>
+    </div>
+
+    <script>
+        let mediaRecorder, audioChunks = [], audioBlob;
+
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const status = document.getElementById('status');
+        const audioPreview = document.getElementById('audioPreview');
+
+        startBtn.onclick = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.onstop = () => {
+                    audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    audioPreview.src = URL.createObjectURL(audioBlob);
+                    uploadBtn.disabled = false;
+                };
+
+                mediaRecorder.start();
+                status.textContent = '🎙️ Recording audio now... Speak clearly!';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            } catch (err) {
+                alert('Microphone access denied or not supported by browser.');
+            }
+        };
+
+        stopBtn.onclick = () => {
+            mediaRecorder.stop();
+            status.textContent = '⏹️ Recording finished. Play audio to check before uploading.';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        };
+
+        uploadBtn.onclick = async () => {
+            const studentId = document.getElementById('studentId').value;
+            if (!studentId) return alert('Please enter your Student ID first!');
+
+            const formData = new FormData();
+            formData.append('student_id', studentId);
+            formData.append('audio', audioBlob);
+
+            status.textContent = '⏳ Uploading your audio...';
+            try {
+                const res = await fetch('/api/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (data.success) {
+                    status.textContent = '✅ Submitted successfully! Good job!';
+                    uploadBtn.disabled = true;
+                } else {
+                    status.textContent = '❌ Upload failed. Please try again.';
+                }
+            } catch (e) {
+                status.textContent = '❌ Upload failed. Connection error.';
+            }
+        };
+    </script>
+</body>
+</html>
