@@ -1,0 +1,16 @@
+{
+  "short_name": "ReadAloud",
+  "name": "HKDSE English Read-Aloud Portal",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2991/2991174.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/index.html",
+  "background_color": "#f7fafc",
+  "theme_color": "#1b365d",
+  "display": "standalone",
+  "orientation": "portrait"
+}
