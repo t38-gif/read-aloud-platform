@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Teacher All-Time Progress & Audio Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
+        body { font-family: Arial, sans-serif; max-width: 1050px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
         h1 { color: #1b365d; text-align: center; }
         .summary-card { background: white; border: 1px solid #cbd5e0; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
         table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
@@ -14,16 +14,17 @@
         .badge-completed { background-color: #c6f6d5; color: #22543d; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
         .badge-pending { background-color: #feebc8; color: #744210; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
         .btn-listen { background-color: #3182ce; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        .audio-list { margin-top: 10px; padding: 10px; background: #edf2f7; border-radius: 6px; display: none; }
+        .audio-list { margin-top: 10px; padding: 12px; background: #edf2f7; border-radius: 6px; display: none; }
         .week-tag { background: #e2e8f0; color: #2d3748; padding: 3px 6px; border-radius: 4px; font-weight: bold; }
+        .flagged-tag { color: #c53030; font-weight: bold; display: inline-block; margin-right: 6px; }
     </style>
 </head>
 <body>
-    <h1>📋 Teacher All-Time Monitoring Dashboard</h1>
+    <h1>📋 Teacher All-Time Accumulative Dashboard</h1>
     
     <div class="summary-card">
-        <h3>All Weeks Submission Records</h3>
-        <p>Weekly Target: <strong>4 submissions per student per week</strong></p>
+        <h3>All Historical Weekly Records</h3>
+        <p>Weekly Requirement: <strong>4 submissions per student per week</strong></p>
     </div>
 
     <table>
@@ -39,7 +40,7 @@
             </tr>
         </thead>
         <tbody id="progressTable">
-            <tr><td colspan="7">Loading student data...</td></tr>
+            <tr><td colspan="7">Loading accumulative student data...</td></tr>
         </tbody>
     </table>
 
@@ -70,7 +71,7 @@
                         <td><span class="${badgeClass}">${row.status}</span></td>
                         <td><strong style="color: #2b6cb0;">${row.avg_score || 'N/A'}</strong> / 100</td>
                         <td>
-                            <button class="btn-listen" onclick="toggleAudioList('${row.student_id}', ${row.year}, ${row.week_number})">🎧 Retrieve Soundtracks</button>
+                            <button class="btn-listen" onclick="toggleAudioList('${row.student_id}', ${row.year}, ${row.week_number})">🎧 Soundtracks & Details</button>
                             <div id="${listId}" class="audio-list">Loading recordings...</div>
                         </td>
                     `;
@@ -98,12 +99,16 @@
                 return;
             }
 
-            container.innerHTML = data.submissions.map(sub => `
-                <div style="margin-bottom: 8px;">
-                    <small>👤 ${sub.student_name} | 📅 ${new Date(sub.submitted_at).toLocaleString()} | Score: <strong>${sub.score}/100</strong></small><br>
-                    <audio controls src="/${sub.audio_file_path}" style="width: 100%; height: 35px;"></audio>
-                </div>
-            `).join('');
+            container.innerHTML = data.submissions.map(sub => {
+                const wordsList = sub.mispronounced.map(w => `<span class="flagged-tag">❌ ${w.word}</span>`).join(' ');
+                return `
+                    <div style="margin-bottom: 12px; border-bottom: 1px solid #cbd5e0; padding-bottom: 8px;">
+                        <small>👤 <strong>${sub.student_name}</strong> | 📅 ${new Date(sub.submitted_at).toLocaleString()} | Score: <strong>${sub.score}/100</strong></small><br>
+                        <audio controls src="/${sub.audio_file_path}" style="width: 100%; height: 35px; margin: 4px 0;"></audio><br>
+                        <small><strong>Flagged Words:</strong> ${wordsList || 'None'}</small>
+                    </div>
+                `;
+            }).join('');
         }
 
         loadProgress();
