@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Teacher Progress & Soundtrack Review</title>
+    <title>Teacher All-Time Progress & Audio Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 900px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
+        body { font-family: Arial, sans-serif; max-width: 950px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
         h1 { color: #1b365d; text-align: center; }
         .summary-card { background: white; border: 1px solid #cbd5e0; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
         table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
@@ -15,28 +15,30 @@
         .badge-pending { background-color: #feebc8; color: #744210; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
         .btn-listen { background-color: #3182ce; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
         .audio-list { margin-top: 10px; padding: 10px; background: #edf2f7; border-radius: 6px; display: none; }
+        .week-tag { background: #e2e8f0; color: #2d3748; padding: 3px 6px; border-radius: 4px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>📋 Teacher Monitoring & Audio Dashboard</h1>
+    <h1>📋 Teacher All-Time Monitoring Dashboard</h1>
     
     <div class="summary-card">
-        <h3 id="weekInfo">Current Week Progress</h3>
-        <p>Weekly Requirement: <strong>4 submissions per student</strong></p>
+        <h3>All Weeks Submission Records</h3>
+        <p>Weekly Target: <strong>4 submissions per student per week</strong></p>
     </div>
 
     <table>
         <thead>
             <tr>
+                <th>Week / Year</th>
                 <th>Student ID</th>
-                <th>Submissions This Week</th>
-                <th>Weekly Status</th>
-                <th>Avg Score (0-100)</th>
+                <th>Submissions</th>
+                <th>Target Status</th>
+                <th>Avg Score</th>
                 <th>Action</th>
             </tr>
         </thead>
         <tbody id="progressTable">
-            <tr><td colspan="5">Loading student data...</td></tr>
+            <tr><td colspan="6">Loading student data...</td></tr>
         </tbody>
     </table>
 
@@ -46,45 +48,47 @@
                 const res = await fetch('/api/progress');
                 const data = await res.json();
                 
-                document.getElementById('weekInfo').textContent = `Week ${data.week}, ${data.year} Tracking Summary`;
                 const tableBody = document.getElementById('progressTable');
                 tableBody.innerHTML = '';
 
                 if (data.progress.length === 0) {
-                    tableBody.innerHTML = '<tr><td colspan="5">No submissions recorded yet for this week.</td></tr>';
+                    tableBody.innerHTML = '<tr><td colspan="6">No submissions recorded yet.</td></tr>';
                     return;
                 }
 
-                data.progress.forEach(student => {
-                    const row = document.createElement('tr');
-                    const badgeClass = student.status === 'Completed' ? 'badge-completed' : 'badge-pending';
+                data.progress.forEach(row => {
+                    const tr = document.createElement('tr');
+                    const badgeClass = row.status === 'Completed' ? 'badge-completed' : 'badge-pending';
+                    const listId = `audioList-${row.student_id}-${row.year}-${row.week_number}`;
                     
-                    row.innerHTML = `
-                        <td><strong>Student #${student.student_id}</strong></td>
-                        <td>${student.weekly_count} / 4 recordings</td>
-                        <td><span class="${badgeClass}">${student.status}</span></td>
-                        <td><strong style="color: #2b6cb0;">${student.avg_score || 'N/A'}</strong> / 100</td>
+                    tr.innerHTML = `
+                        <td><span class="week-tag">Week ${row.week_number}, ${row.year}</span></td>
+                        <td><strong>Student #${row.student_id}</strong></td>
+                        <td>${row.weekly_count} / 4 recordings</td>
+                        <td><span class="${badgeClass}">${row.status}</span></td>
+                        <td><strong style="color: #2b6cb0;">${row.avg_score || 'N/A'}</strong> / 100</td>
                         <td>
-                            <button class="btn-listen" onclick="toggleAudioList(${student.student_id})">🎧 Retrieve Soundtracks</button>
-                            <div id="audioList-${student.student_id}" class="audio-list">Loading recordings...</div>
+                            <button class="btn-listen" onclick="toggleAudioList('${row.student_id}', ${row.year}, ${row.week_number})">🎧 Retrieve Soundtracks</button>
+                            <div id="${listId}" class="audio-list">Loading recordings...</div>
                         </td>
                     `;
-                    tableBody.appendChild(row);
+                    tableBody.appendChild(tr);
                 });
             } catch (err) {
                 console.error(err);
             }
         }
 
-        async function toggleAudioList(studentId) {
-            const container = document.getElementById(`audioList-${studentId}`);
+        async function toggleAudioList(studentId, year, week) {
+            const listId = `audioList-${studentId}-${year}-${week}`;
+            const container = document.getElementById(listId);
             if (container.style.display === 'block') {
                 container.style.display = 'none';
                 return;
             }
 
             container.style.display = 'block';
-            const res = await fetch(`/api/submissions/${studentId}`);
+            const res = await fetch(`/api/submissions/${studentId}/${year}/${week}`);
             const data = await res.json();
 
             if (data.submissions.length === 0) {
