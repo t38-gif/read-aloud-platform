@@ -9,7 +9,7 @@ const app = express();
 // Initialize SQLite database
 const db = new sqlite3.Database('./read_aloud.db');
 
-// Ensure database table includes score columns
+// Ensure database table includes score and week columns
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS submissions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,10 +37,12 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+// Express Middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Helper: Calculate ISO Week Number
 function getISOWeek(date = new Date()) {
     const tmpDate = new Date(date.getTime());
     tmpDate.setHours(0, 0, 0, 0);
@@ -49,15 +51,14 @@ function getISOWeek(date = new Date()) {
     return 1 + Math.round(((tmpDate.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
-// Simulated AI Speech Assessment Algorithm (Evaluates duration, clarity, and articulation dynamics)
+// Simulated Speech Assessment Algorithm (Pronunciation, Intonation, Accent score 0-100)
 function calculateSpeechScore(fileSize) {
-    // Generates a realistic HKDSE oral score weighted between 65 and 98
     const baseScore = 70;
     const variation = Math.floor(Math.random() * 25);
     return Math.min(100, baseScore + variation);
 }
 
-// API: Handle Audio Upload & Instant Scoring
+// API Endpoint: Audio Upload & Instant Scoring
 app.post('/api/upload', upload.single('audio'), (req, res) => {
     const { student_id } = req.body;
     if (!req.file) {
@@ -69,7 +70,6 @@ app.post('/api/upload', upload.single('audio'), (req, res) => {
     const week_number = getISOWeek(now);
     const year = now.getFullYear();
     
-    // Calculate Instant Score (Pronunciation, Intonation, Accent)
     const score = calculateSpeechScore(req.file.size);
 
     db.run(
@@ -86,41 +86,42 @@ app.post('/api/upload', upload.single('audio'), (req, res) => {
     );
 });
 
-// API: Detailed Progress & Soundtrack Retrieval for Teacher Dashboard
+// API Endpoint: All-Time Weekly Progress for Teacher Dashboard
 app.get('/api/progress', (req, res) => {
-    const currentWeek = getISOWeek();
-    const currentYear = new Date().getFullYear();
-
     const query = `
         SELECT 
             student_id,
+            week_number,
+            year,
             COUNT(id) AS weekly_count,
             ROUND(AVG(score), 1) AS avg_score,
             CASE WHEN COUNT(id) >= 4 THEN 'Completed' ELSE 'Pending' END AS status
         FROM submissions
-        WHERE week_number = ? AND year = ?
-        GROUP BY student_id
+        GROUP BY student_id, year, week_number
+        ORDER BY year DESC, week_number DESC, student_id ASC
     `;
 
-    db.all(query, [currentWeek, currentYear], (err, rows) => {
+    db.all(query, [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ week: currentWeek, year: currentYear, progress: rows });
+        res.json({ progress: rows });
     });
 });
 
-// API: Retrieve All Audio Submissions per Student
-app.get('/api/submissions/:student_id', (req, res) => {
+// API Endpoint: Retrieve Audio Files for Specific Student, Year & Week
+app.get('/api/submissions/:student_id/:year/:week', (req, res) => {
+    const { student_id, year, week } = req.params;
     const query = `
         SELECT id, audio_file_path, score, submitted_at 
         FROM submissions 
-        WHERE student_id = ? 
+        WHERE student_id = ? AND year = ? AND week_number = ?
         ORDER BY submitted_at DESC
     `;
-    db.all(query, [req.params.student_id], (err, rows) => {
+    db.all(query, [student_id, year, week], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ submissions: rows });
     });
 });
 
+// Dynamic Port Assignment for Render
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
