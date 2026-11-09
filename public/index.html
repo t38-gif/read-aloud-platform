@@ -25,8 +25,11 @@
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         #status { text-align: center; font-weight: bold; margin-top: 15px; color: #2d3748; }
         audio { width: 100%; margin-top: 15px; }
-        .score-box { display: none; margin-top: 20px; padding: 15px; background: #ebf8ff; border: 2px solid #3182ce; border-radius: 8px; text-align: center; }
-        .score-number { font-size: 36px; font-weight: bold; color: #2b6cb0; margin: 5px 0; }
+        .score-box { display: none; margin-top: 20px; padding: 18px; background: #ebf8ff; border: 2px solid #3182ce; border-radius: 8px; }
+        .score-number { font-size: 36px; font-weight: bold; color: #2b6cb0; text-align: center; margin: 5px 0; }
+        .feedback-title { font-weight: bold; color: #2c5282; margin-top: 12px; border-bottom: 1px solid #bee3f8; padding-bottom: 4px; }
+        .word-item { background: white; margin: 6px 0; padding: 8px 10px; border-radius: 6px; border-left: 4px solid #e53e3e; font-size: 14px; }
+        .word-name { font-weight: bold; color: #c53030; }
     </style>
 </head>
 <body>
@@ -48,9 +51,11 @@
         <p id="status"></p>
 
         <div id="scoreBox" class="score-box">
-            <div>🎯 Instant Pronunciation & Intonation Score:</div>
+            <div style="text-align: center; font-weight: bold; color: #2b6cb0;">🎯 Overall Pronunciation Score:</div>
             <div id="scoreDisplay" class="score-number">0 / 100</div>
-            <small style="color: #4a5568;">Evaluated on Accent Clarity & Fluency</small>
+
+            <div class="feedback-title">⚠️ Words Needing Improvement (3 Words):</div>
+            <div id="wordList"></div>
         </div>
     </div>
 
@@ -64,6 +69,7 @@
         const audioPreview = document.getElementById('audioPreview');
         const scoreBox = document.getElementById('scoreBox');
         const scoreDisplay = document.getElementById('scoreDisplay');
+        const wordList = document.getElementById('wordList');
 
         startBtn.onclick = async () => {
             try {
@@ -108,7 +114,7 @@
             formData.append('student_name', studentName);
             formData.append('audio', audioBlob);
 
-            status.textContent = '⏳ Analyzing audio & calculating score...';
+            status.textContent = '⏳ Analyzing audio & analyzing pronunciation...';
             try {
                 const res = await fetch('/api/upload', { method: 'POST', body: formData });
                 const data = await res.json();
@@ -116,6 +122,14 @@
                 if (data.success) {
                     status.textContent = '✅ Submitted & Scored Successfully!';
                     scoreDisplay.textContent = `${data.score} / 100`;
+                    
+                    wordList.innerHTML = data.mispronounced.map((item, idx) => `
+                        <div class="word-item">
+                            ${idx + 1}. <span class="word-name">${item.word}</span><br>
+                            <small style="color: #4a5568;">💡 Note: ${item.issue}</small>
+                        </div>
+                    `).join('');
+
                     scoreBox.style.display = 'block';
                     uploadBtn.disabled = true;
                 } else {
