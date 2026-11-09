@@ -30,6 +30,7 @@
         .feedback-title { font-weight: bold; color: #2c5282; margin-top: 12px; border-bottom: 1px solid #bee3f8; padding-bottom: 4px; }
         .word-item { background: white; margin: 6px 0; padding: 8px 10px; border-radius: 6px; border-left: 4px solid #e53e3e; font-size: 14px; }
         .word-name { font-weight: bold; color: #c53030; }
+        .transcript-box { font-style: italic; background: #edf2f7; padding: 8px; border-radius: 6px; font-size: 13px; margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -54,13 +55,17 @@
             <div style="text-align: center; font-weight: bold; color: #2b6cb0;">🎯 Overall Pronunciation Score:</div>
             <div id="scoreDisplay" class="score-number">0 / 100</div>
 
-            <div class="feedback-title">⚠️ Words Needing Improvement (3 Words):</div>
+            <div class="feedback-title">📝 Spoken Speech Recognized:</div>
+            <div id="transcriptDisplay" class="transcript-box"></div>
+
+            <div class="feedback-title">⚠️ Words Flagged for Practice:</div>
             <div id="wordList"></div>
         </div>
     </div>
 
     <script>
         let mediaRecorder, audioChunks = [], audioBlob;
+        let recognition, spokenTranscript = "";
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -69,13 +74,30 @@
         const audioPreview = document.getElementById('audioPreview');
         const scoreBox = document.getElementById('scoreBox');
         const scoreDisplay = document.getElementById('scoreDisplay');
+        const transcriptDisplay = document.getElementById('transcriptDisplay');
         const wordList = document.getElementById('wordList');
+
+        // Setup Speech Recognition
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event) => {
+                spokenTranscript = Array.from(event.results)
+                    .map(result => result[0].transcript)
+                    .join(' ');
+            };
+        }
 
         startBtn.onclick = async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream);
                 audioChunks = [];
+                spokenTranscript = "";
 
                 mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
                 mediaRecorder.onstop = () => {
@@ -85,7 +107,9 @@
                 };
 
                 mediaRecorder.start();
-                status.textContent = '🎙️ Recording audio now... Speak clearly!';
+                if (recognition) recognition.start();
+
+                status.textContent = '🎙️ Recording & listening now... Speak clearly!';
                 scoreBox.style.display = 'none';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
@@ -96,55 +120,7 @@
 
         stopBtn.onclick = () => {
             mediaRecorder.stop();
+            if (recognition) recognition.stop();
+
             status.textContent = '⏹️ Recording finished. Preview below before submitting.';
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-        };
-
-        uploadBtn.onclick = async () => {
-            const studentId = document.getElementById('studentId').value;
-            const studentName = document.getElementById('studentName').value;
-            
-            if (!studentId || !studentName) {
-                return alert('Please enter both your Student ID and Full Name!');
-            }
-
-            const formData = new FormData();
-            formData.append('student_id', studentId);
-            formData.append('student_name', studentName);
-            formData.append('audio', audioBlob);
-
-            status.textContent = '⏳ Analyzing audio & analyzing pronunciation...';
-            try {
-                const res = await fetch('/api/upload', { method: 'POST', body: formData });
-                const data = await res.json();
-
-                if (data.success) {
-                    status.textContent = '✅ Submitted & Scored Successfully!';
-                    scoreDisplay.textContent = `${data.score} / 100`;
-                    
-                    wordList.innerHTML = data.mispronounced.map((item, idx) => `
-                        <div class="word-item">
-                            ${idx + 1}. <span class="word-name">${item.word}</span><br>
-                            <small style="color: #4a5568;">💡 Note: ${item.issue}</small>
-                        </div>
-                    `).join('');
-
-                    scoreBox.style.display = 'block';
-                    uploadBtn.disabled = true;
-                } else {
-                    status.textContent = '❌ Upload failed. Try again.';
-                }
-            } catch (e) {
-                status.textContent = '❌ Upload failed. Connection error.';
-            }
-        };
-
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js');
-            });
-        }
-    </script>
-</body>
-</html>
+            startBtn.disabled = false
