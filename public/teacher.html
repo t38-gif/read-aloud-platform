@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Teacher All-Time Progress & Audio Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 950px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
+        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
         h1 { color: #1b365d; text-align: center; }
         .summary-card { background: white; border: 1px solid #cbd5e0; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
         table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
@@ -31,6 +31,7 @@
             <tr>
                 <th>Week / Year</th>
                 <th>Student ID</th>
+                <th>Student Name</th>
                 <th>Submissions</th>
                 <th>Target Status</th>
                 <th>Avg Score</th>
@@ -38,7 +39,7 @@
             </tr>
         </thead>
         <tbody id="progressTable">
-            <tr><td colspan="6">Loading student data...</td></tr>
+            <tr><td colspan="7">Loading student data...</td></tr>
         </tbody>
     </table>
 
@@ -52,7 +53,7 @@
                 tableBody.innerHTML = '';
 
                 if (data.progress.length === 0) {
-                    tableBody.innerHTML = '<tr><td colspan="6">No submissions recorded yet.</td></tr>';
+                    tableBody.innerHTML = '<tr><td colspan="7">No submissions recorded yet.</td></tr>';
                     return;
                 }
 
@@ -63,7 +64,8 @@
                     
                     tr.innerHTML = `
                         <td><span class="week-tag">Week ${row.week_number}, ${row.year}</span></td>
-                        <td><strong>Student #${row.student_id}</strong></td>
+                        <td><strong>#${row.student_id}</strong></td>
+                        <td><strong>${row.student_name || 'N/A'}</strong></td>
                         <td>${row.weekly_count} / 4 recordings</td>
                         <td><span class="${badgeClass}">${row.status}</span></td>
                         <td><strong style="color: #2b6cb0;">${row.avg_score || 'N/A'}</strong> / 100</td>
@@ -98,7 +100,7 @@
 
             container.innerHTML = data.submissions.map(sub => `
                 <div style="margin-bottom: 8px;">
-                    <small>📅 ${new Date(sub.submitted_at).toLocaleString()} | Score: <strong>${sub.score}/100</strong></small><br>
+                    <small>👤 ${sub.student_name} | 📅 ${new Date(sub.submitted_at).toLocaleString()} | Score: <strong>${sub.score}/100</strong></small><br>
                     <audio controls src="/${sub.audio_file_path}" style="width: 100%; height: 35px;"></audio>
                 </div>
             `).join('');
