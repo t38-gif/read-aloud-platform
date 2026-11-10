@@ -65,7 +65,7 @@
 
     <script>
         let mediaRecorder, audioChunks = [], audioBlob;
-        let recognition, spokenTranscript = "";
+        let recognition = null, spokenTranscript = "";
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -77,50 +77,137 @@
         const transcriptDisplay = document.getElementById('transcriptDisplay');
         const wordList = document.getElementById('wordList');
 
-        // Setup Speech Recognition
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
-            recognition = new SpeechRecognition();
-            recognition.continuous = true;
-            recognition.interimResults = false;
-            recognition.lang = 'en-US';
+        // Safely Initialize Web Speech API
+        try {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognition) {
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
 
-            recognition.onresult = (event) => {
-                spokenTranscript = Array.from(event.results)
-                    .map(result => result[0].transcript)
-                    .join(' ');
-            };
+                recognition.onresult = (event) => {
+                    spokenTranscript = Array.from(event.results)
+                        .map(result => result[0].transcript)
+                        .join(' ');
+                };
+            }
+        } catch (e) {
+            console.log("Web Speech API non-critical initialization skip.");
         }
 
         startBtn.onclick = async () => {
+            // Check HTTPS requirement
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                alert('Microphone access requires HTTPS. Please access the website via https://');
+                return;
+            }
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('Microphone access is not supported by this browser. Please use Chrome or Safari.');
+                return;
+            }
+
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
+                
+                // Select supported MIME type across iOS Safari and Chrome
+                let options = {};
+                if (MediaRecorder.isTypeSupported('audio/webm')) {
+                    options = { mimeType: 'audio/webm' };
+                } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                    options = { mimeType: 'audio/mp4' };
+                }
+
+                mediaRecorder = new MediaRecorder(stream, options);
                 audioChunks = [];
                 spokenTranscript = "";
 
-                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.ondataavailable = e => {
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                };
+
                 mediaRecorder.onstop = () => {
-                    audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const mimeType = mediaRecorder.mimeType || 'audio/webm';
+                    audioBlob = new Blob(audioChunks, { type: mimeType });
                     audioPreview.src = URL.createObjectURL(audioBlob);
                     uploadBtn.disabled = false;
                 };
 
                 mediaRecorder.start();
-                if (recognition) recognition.start();
+                if (recognition) {
+                    try { recognition.start(); } catch (e) {}
+                }
 
-                status.textContent = '🎙️ Recording & listening now... Speak clearly!';
+                status.textContent = '🎙️ Recording audio now... Speak clearly!';
                 scoreBox.style.display = 'none';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
             } catch (err) {
-                alert('Microphone access denied or not supported by browser.');
+                console.error(err);
+                alert('Microphone access denied or blocked. Please allow microphone permissions in your browser settings.');
             }
         };
 
         stopBtn.onclick = () => {
-            mediaRecorder.stop();
-            if (recognition) recognition.stop();
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            if (recognition) {
+                try { recognition.stop(); } catch (e) {}
+            }
 
             status.textContent = '⏹️ Recording finished. Preview below before submitting.';
-            startBtn.disabled = false
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        };
+
+        uploadBtn.onclick = async () => {
+            const studentId = document.getElementById('studentId').value;
+            const studentName = document.getElementById('studentName').value;
+            
+            if (!studentId || !studentName) {
+                return alert('Please enter both your Student ID and Full Name!');
+            }
+
+            const formData = new FormData();
+            formData.append('student_id', studentId);
+            formData.append('student_name', studentName);
+            formData.append('transcript', spokenTranscript);
+            formData.append('audio', audioBlob, 'recording.webm');
+
+            status.textContent = '⏳ Analyzing spoken words & calculating score...';
+            try {
+                const res = await fetch('/api/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (data.success) {
+                    status.textContent = '✅ Submitted & Scored Successfully!';
+                    scoreDisplay.textContent = `${data.score} / 100`;
+                    transcriptDisplay.textContent = data.transcript || spokenTranscript || "(Speech captured as audio)";
+
+                    wordList.innerHTML = data.mispronounced.map((item, idx) => `
+                        <div class="word-item">
+                            ${idx + 1}. <span class="word-name">${item.word}</span><br>
+                            <small style="color: #4a5568;">💡 Note: ${item.issue}</small>
+                        </div>
+                    `).join('');
+
+                    scoreBox.style.display = 'block';
+                    uploadBtn.disabled = true;
+                } else {
+                    status.textContent = '❌ Upload failed. Try again.';
+                }
+            } catch (e) {
+                status.textContent = '❌ Upload failed. Connection error.';
+            }
+        };
+
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js');
+            });
+        }
+    </script>
+</body>
+</html>
