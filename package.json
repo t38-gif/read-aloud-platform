@@ -1,7 +1,7 @@
 {
-  "name": "read-aloud-tracker",
+  "name": "hkdse-read-aloud",
   "version": "1.0.0",
-  "description": "Student Read-Aloud Audio Tracker",
+  "description": "HKDSE Student Read-Aloud Platform",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -9,6 +9,6 @@
   "dependencies": {
     "express": "^4.18.2",
     "multer": "^1.4.5-lts.1",
-    "sqlite3": "^5.1.6"
+    "pg": "^8.11.3"
   }
 }
