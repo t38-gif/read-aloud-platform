@@ -7,7 +7,6 @@ const fs = require('fs');
 
 const app = express();
 
-// 優先使用 Supabase PostgreSQL，若未設定則自動降級使用 SQLite
 let usePostgres = false;
 let pool = null;
 let db = null;
@@ -18,13 +17,10 @@ if (process.env.DATABASE_URL) {
         connectionString: process.env.DATABASE_URL,
         ssl: { rejectUnauthorized: false }
     });
-    console.log('Using PostgreSQL (Supabase)');
 } else {
     db = new sqlite3.Database('./read_aloud.db');
-    console.log('Using Local SQLite');
 }
 
-// 初始化資料庫資料表
 async function initDB() {
     if (usePostgres) {
         try {
@@ -42,9 +38,8 @@ async function initDB() {
                     submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             `);
-            console.log('PostgreSQL table verified.');
         } catch (err) {
-            console.error('PostgreSQL init error:', err);
+            console.error('PostgreSQL Table Init Error:', err);
         }
     } else {
         db.serialize(() => {
@@ -61,12 +56,10 @@ async function initDB() {
                 submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )`);
         });
-        console.log('SQLite table verified.');
     }
 }
 initDB();
 
-// 設定上傳目錄
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -76,7 +69,8 @@ const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, 'uploads/'),
     filename: (req, file, cb) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, `audio-${req.body.student_id}-${uniqueSuffix}.webm`);
+        const stId = req.body.student_id || 'unknown';
+        cb(null, `audio-${stId}-${uniqueSuffix}.webm`);
     }
 });
 const upload = multer({ storage });
@@ -133,19 +127,24 @@ function analyzeSpokenWords(transcript) {
     return { score, mispronounced };
 }
 
-// API: 音訊上傳與寫入
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
     try {
-        const { student_id, student_name, transcript } = req.body;
         if (!req.file) {
-            return res.status(400).json({ error: 'No audio file received' });
+            return res.status(400).json({ success: false, error: 'No audio file payload attached' });
         }
 
+        const student_id = parseInt(req.body.student_id, 10);
+        if (isNaN(student_id)) {
+            return res.status(400).json({ success: false, error: 'Invalid Student ID' });
+        }
+
+        const student_name = req.body.student_name && req.body.student_name.trim() !== '' ? req.body.student_name.trim() : 'Unknown';
+        const transcript = req.body.transcript || '';
         const audio_file_path = req.file.path.replace(/\\/g, '/');
+
         const now = new Date();
         const week_number = getISOWeek(now);
         const year = now.getFullYear();
-        const nameToSave = student_name && student_name.trim() !== '' ? student_name.trim() : 'Unknown';
 
         const analysis = analyzeSpokenWords(transcript);
         const mispronouncedJson = JSON.stringify(analysis.mispronounced);
@@ -155,7 +154,7 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
                 INSERT INTO submissions (student_id, student_name, audio_file_path, transcript, score, mispronounced_words, week_number, year)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
             `;
-            const values = [student_id, nameToSave, audio_file_path, transcript || '', analysis.score, mispronouncedJson, week_number, year];
+            const values = [student_id, student_name, audio_file_path, transcript, analysis.score, mispronouncedJson, week_number, year];
             const result = await pool.query(query, values);
 
             return res.json({ 
@@ -168,9 +167,9 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
         } else {
             db.run(
                 `INSERT INTO submissions (student_id, student_name, audio_file_path, transcript, score, mispronounced_words, week_number, year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [student_id, nameToSave, audio_file_path, transcript || '', analysis.score, mispronouncedJson, week_number, year],
+                [student_id, student_name, audio_file_path, transcript, analysis.score, mispronouncedJson, week_number, year],
                 function (err) {
-                    if (err) return res.status(500).json({ error: err.message });
+                    if (err) return res.status(500).json({ success: false, error: err.message });
                     res.json({ 
                         success: true, 
                         submission_id: this.lastID,
@@ -183,11 +182,10 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
         }
     } catch (err) {
         console.error('Upload Endpoint Error:', err);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
-// API: 教師端讀取累積進度
 app.get('/api/progress', async (req, res) => {
     const queryStr = `
         SELECT 
@@ -209,16 +207,15 @@ app.get('/api/progress', async (req, res) => {
             res.json({ progress: result.rows });
         } else {
             db.all(queryStr, [], (err, rows) => {
-                if (err) return res.status(500).json({ error: err.message });
+                if (err) return res.status(500).json({ success: false, error: err.message });
                 res.json({ progress: rows });
             });
         }
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
-// API: 讀取特定學生的音訊紀錄
 app.get('/api/submissions/:student_id/:year/:week', async (req, res) => {
     const { student_id, year, week } = req.params;
     
@@ -230,14 +227,14 @@ app.get('/api/submissions/:student_id/:year/:week', async (req, res) => {
                 WHERE student_id = $1 AND year = $2 AND week_number = $3
                 ORDER BY submitted_at DESC
             `;
-            const result = await pool.query(query, [student_id, year, week]);
+            const result = await pool.query(query, [parseInt(student_id, 10), parseInt(year, 10), parseInt(week, 10)]);
             const processedRows = result.rows.map(r => ({
                 ...r,
                 mispronounced: r.mispronounced_words ? JSON.parse(r.mispronounced_words) : []
             }));
             res.json({ submissions: processedRows });
         } catch (err) {
-            res.status(500).json({ error: err.message });
+            res.status(500).json({ success: false, error: err.message });
         }
     } else {
         const query = `
@@ -247,7 +244,7 @@ app.get('/api/submissions/:student_id/:year/:week', async (req, res) => {
             ORDER BY submitted_at DESC
         `;
         db.all(query, [student_id, year, week], (err, rows) => {
-            if (err) return res.status(500).json({ error: err.message });
+            if (err) return res.status(500).json({ success: false, error: err.message });
             const processedRows = rows.map(r => ({
                 ...r,
                 mispronounced: r.mispronounced_words ? JSON.parse(r.mispronounced_words) : []
