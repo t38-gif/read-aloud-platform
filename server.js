@@ -1,27 +1,38 @@
 const express = require('express');
 const multer = require('multer');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const path = require('path');
 const fs = require('fs');
 
 const app = express();
 
-const db = new sqlite3.Database('./read_aloud.db');
-
-db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS submissions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        student_id INTEGER NOT NULL,
-        student_name TEXT NOT NULL DEFAULT 'Unknown',
-        audio_file_path TEXT NOT NULL,
-        transcript TEXT DEFAULT '',
-        score INTEGER DEFAULT 0,
-        mispronounced_words TEXT NOT NULL DEFAULT '',
-        week_number INTEGER NOT NULL,
-        year INTEGER NOT NULL,
-        submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
 });
+
+async function initDB() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS submissions (
+                id SERIAL PRIMARY KEY,
+                student_id INT NOT NULL,
+                student_name VARCHAR(255) NOT NULL DEFAULT 'Unknown',
+                audio_file_path TEXT NOT NULL,
+                transcript TEXT DEFAULT '',
+                score INT DEFAULT 0,
+                mispronounced_words TEXT NOT NULL DEFAULT '',
+                week_number INT NOT NULL,
+                year INT NOT NULL,
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log('Database connected & table verified.');
+    } catch (err) {
+        console.error('Database connection error:', err);
+    }
+}
+initDB();
 
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -49,7 +60,6 @@ function getISOWeek(date = new Date()) {
     return 1 + Math.round(((tmpDate.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
-// Analyzes the ACTUAL words spoken by the student
 function analyzeSpokenWords(transcript) {
     if (!transcript || transcript.trim() === '') {
         return {
@@ -62,15 +72,12 @@ function analyzeSpokenWords(transcript) {
         };
     }
 
-    // Clean and split words spoken by the student
     const words = transcript
         .replace(/[^\w\s]/gi, '')
         .split(/\s+/)
         .filter(w => w.length > 3);
 
     const uniqueSpokenWords = [...new Set(words)];
-
-    // Target 3 spoken words (longer words selected for phonetic emphasis)
     uniqueSpokenWords.sort((a, b) => b.length - a.length);
     const selected = uniqueSpokenWords.slice(0, 3);
 
@@ -79,7 +86,6 @@ function analyzeSpokenWords(transcript) {
         issue: `Check syllable stress & clarity on '${w}'`
     }));
 
-    // Fill remaining if student spoke fewer than 3 long words
     const backups = [
         { word: "Intonation", issue: "Maintain steady pitch variation" },
         { word: "Fluency", issue: "Avoid pausing mid-sentence" },
@@ -94,11 +100,9 @@ function analyzeSpokenWords(transcript) {
     return { score, mispronounced };
 }
 
-app.post('/api/upload', upload.single('audio'), (req, res) => {
+app.post('/api/upload', upload.single('audio'), async (req, res) => {
     const { student_id, student_name, transcript } = req.body;
-    if (!req.file) {
-        return res.status(400).json({ error: 'No audio file received' });
-    }
+    if (!req.file) return res.status(400).json({ error: 'No audio file received' });
 
     const audio_file_path = req.file.path.replace(/\\/g, '/');
     const now = new Date();
@@ -109,61 +113,68 @@ app.post('/api/upload', upload.single('audio'), (req, res) => {
     const analysis = analyzeSpokenWords(transcript);
     const mispronouncedJson = JSON.stringify(analysis.mispronounced);
 
-    db.run(
-        `INSERT INTO submissions (student_id, student_name, audio_file_path, transcript, score, mispronounced_words, week_number, year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [student_id, nameToSave, audio_file_path, transcript || '', analysis.score, mispronouncedJson, week_number, year],
-        function (err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ 
-                success: true, 
-                submission_id: this.lastID,
-                score: analysis.score,
-                transcript: transcript,
-                mispronounced: analysis.mispronounced
-            });
-        }
-    );
+    try {
+        const query = `
+            INSERT INTO submissions (student_id, student_name, audio_file_path, transcript, score, mispronounced_words, week_number, year)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id
+        `;
+        const values = [student_id, nameToSave, audio_file_path, transcript || '', analysis.score, mispronouncedJson, week_number, year];
+        const result = await pool.query(query, values);
+
+        res.json({ 
+            success: true, 
+            submission_id: result.rows[0].id,
+            score: analysis.score,
+            transcript: transcript,
+            mispronounced: analysis.mispronounced
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.get('/api/progress', (req, res) => {
-    const query = `
-        SELECT 
-            student_id,
-            MAX(student_name) AS student_name,
-            week_number,
-            year,
-            COUNT(id) AS weekly_count,
-            ROUND(AVG(score), 1) AS avg_score,
-            CASE WHEN COUNT(id) >= 4 THEN 'Completed' ELSE 'Pending' END AS status
-        FROM submissions
-        GROUP BY student_id, year, week_number
-        ORDER BY year DESC, week_number DESC, student_id ASC
-    `;
-
-    db.all(query, [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ progress: rows });
-    });
+app.get('/api/progress', async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                student_id,
+                MAX(student_name) AS student_name,
+                week_number,
+                year,
+                COUNT(id) AS weekly_count,
+                ROUND(AVG(score), 1) AS avg_score,
+                CASE WHEN COUNT(id) >= 4 THEN 'Completed' ELSE 'Pending' END AS status
+            FROM submissions
+            GROUP BY student_id, year, week_number
+            ORDER BY year DESC, week_number DESC, student_id ASC
+        `;
+        const result = await pool.query(query);
+        res.json({ progress: result.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.get('/api/submissions/:student_id/:year/:week', (req, res) => {
+app.get('/api/submissions/:student_id/:year/:week', async (req, res) => {
     const { student_id, year, week } = req.params;
-    const query = `
-        SELECT id, student_name, audio_file_path, transcript, score, mispronounced_words, submitted_at 
-        FROM submissions 
-        WHERE student_id = ? AND year = ? AND week_number = ?
-        ORDER BY submitted_at DESC
-    `;
-    db.all(query, [student_id, year, week], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
+    try {
+        const query = `
+            SELECT id, student_name, audio_file_path, transcript, score, mispronounced_words, submitted_at 
+            FROM submissions 
+            WHERE student_id = $1 AND year = $2 AND week_number = $3
+            ORDER BY submitted_at DESC
+        `;
+        const result = await pool.query(query, [student_id, year, week]);
         
-        const processedRows = rows.map(r => ({
+        const processedRows = result.rows.map(r => ({
             ...r,
             mispronounced: r.mispronounced_words ? JSON.parse(r.mispronounced_words) : []
         }));
 
-        res.json({ submissions: processedRows });
-    });
+        res.json({ submissions: result.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
