@@ -77,7 +77,6 @@
         const transcriptDisplay = document.getElementById('transcriptDisplay');
         const wordList = document.getElementById('wordList');
 
-        // Safely Initialize Web Speech API
         try {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
@@ -92,34 +91,12 @@
                         .join(' ');
                 };
             }
-        } catch (e) {
-            console.log("Web Speech API non-critical initialization skip.");
-        }
+        } catch (e) {}
 
         startBtn.onclick = async () => {
-            // Check HTTPS requirement
-            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-                alert('Microphone access requires HTTPS. Please access the website via https://');
-                return;
-            }
-
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alert('Microphone access is not supported by this browser. Please use Chrome or Safari.');
-                return;
-            }
-
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                
-                // Select supported MIME type across iOS Safari and Chrome
-                let options = {};
-                if (MediaRecorder.isTypeSupported('audio/webm')) {
-                    options = { mimeType: 'audio/webm' };
-                } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-                    options = { mimeType: 'audio/mp4' };
-                }
-
-                mediaRecorder = new MediaRecorder(stream, options);
+                mediaRecorder = new MediaRecorder(stream);
                 audioChunks = [];
                 spokenTranscript = "";
 
@@ -128,34 +105,26 @@
                 };
 
                 mediaRecorder.onstop = () => {
-                    const mimeType = mediaRecorder.mimeType || 'audio/webm';
-                    audioBlob = new Blob(audioChunks, { type: mimeType });
+                    audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
                     audioPreview.src = URL.createObjectURL(audioBlob);
                     uploadBtn.disabled = false;
                 };
 
                 mediaRecorder.start();
-                if (recognition) {
-                    try { recognition.start(); } catch (e) {}
-                }
+                if (recognition) { try { recognition.start(); } catch(e){} }
 
                 status.textContent = '🎙️ Recording audio now... Speak clearly!';
                 scoreBox.style.display = 'none';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
             } catch (err) {
-                console.error(err);
-                alert('Microphone access denied or blocked. Please allow microphone permissions in your browser settings.');
+                alert('Microphone access denied or blocked.');
             }
         };
 
         stopBtn.onclick = () => {
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-            }
-            if (recognition) {
-                try { recognition.stop(); } catch (e) {}
-            }
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+            if (recognition) { try { recognition.stop(); } catch(e){} }
 
             status.textContent = '⏹️ Recording finished. Preview below before submitting.';
             startBtn.disabled = false;
@@ -170,6 +139,10 @@
                 return alert('Please enter both your Student ID and Full Name!');
             }
 
+            if (!audioBlob) {
+                return alert('Please record your voice first before submitting!');
+            }
+
             const formData = new FormData();
             formData.append('student_id', studentId);
             formData.append('student_name', studentName);
@@ -181,7 +154,7 @@
                 const res = await fetch('/api/upload', { method: 'POST', body: formData });
                 const data = await res.json();
 
-                if (data.success) {
+                if (res.ok && data.success) {
                     status.textContent = '✅ Submitted & Scored Successfully!';
                     scoreDisplay.textContent = `${data.score} / 100`;
                     transcriptDisplay.textContent = data.transcript || spokenTranscript || "(Speech captured as audio)";
@@ -196,17 +169,15 @@
                     scoreBox.style.display = 'block';
                     uploadBtn.disabled = true;
                 } else {
-                    status.textContent = '❌ Upload failed. Try again.';
+                    status.textContent = `❌ Upload failed: ${data.error || 'Server Error'}`;
                 }
             } catch (e) {
-                status.textContent = '❌ Upload failed. Connection error.';
+                status.textContent = `❌ Network Error: ${e.message}`;
             }
         };
 
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js');
-            });
+            window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js'); });
         }
     </script>
 </body>
