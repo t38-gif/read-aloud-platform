@@ -1,247 +1,55 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HKDSE Student Read-Aloud Portal</title>
-    
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#1b365d">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="ReadAloud">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2991/2991174.png">
+const express = require('express');
+const multer = require('multer');
+const nodemailer = require('nodemailer');
+const cron = require('node-cron');
+const { Pool } = require('pg');
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+const fs = require('fs');
 
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 480px; margin: 30px auto; padding: 20px; background-color: #f7fafc; }
-        .card { background: white; border: 1px solid #cbd5e0; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        h2 { color: #1b365d; text-align: center; margin-top: 0; }
-        label { font-weight: bold; color: #4a5568; display: block; margin-top: 10px; }
-        input { width: 100%; padding: 10px; margin: 6px 0 12px 0; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; margin: 6px 0; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 15px; }
-        .btn-start { background-color: #e53e3e; color: white; }
-        .btn-stop { background-color: #718096; color: white; }
-        .btn-submit { background-color: #2b6cb0; color: white; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        #status { text-align: center; font-weight: bold; margin-top: 15px; color: #2d3748; }
-        audio { width: 100%; margin-top: 15px; }
-        .score-box { display: none; margin-top: 20px; padding: 18px; background: #ebf8ff; border: 2px solid #3182ce; border-radius: 8px; }
-        .score-number { font-size: 36px; font-weight: bold; color: #2b6cb0; text-align: center; margin: 5px 0; }
-        .feedback-title { font-weight: bold; color: #2c5282; margin-top: 12px; border-bottom: 1px solid #bee3f8; padding-bottom: 4px; }
-        .word-item { background: white; margin: 6px 0; padding: 8px 10px; border-radius: 6px; border-left: 4px solid #e53e3e; font-size: 14px; }
-        .word-name { font-weight: bold; color: #c53030; }
-        .transcript-box { font-style: italic; background: #edf2f7; padding: 8px; border-radius: 6px; font-size: 13px; margin-top: 6px; }
-        .email-note { background: #edf2f7; color: #2d3748; padding: 8px 10px; border-radius: 6px; font-size: 12px; text-align: center; margin-top: 12px; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h2>🎙️ Student Read-Aloud Portal</h2>
-        
-        <label for="studentId">Student ID / Number:</label>
-        <input type="number" id="studentId" placeholder="e.g. 101" required>
+const app = express();
 
-        <label for="studentName">Student Full Name:</label>
-        <input type="text" id="studentName" placeholder="e.g. Chan Tai Man" required>
+let usePostgres = false;
+let pool = null;
+let db = null;
 
-        <label for="studentEmail">Student Email (Optional — for weekly word list):</label>
-        <input type="email" id="studentEmail" placeholder="e.g. s101@school.edu.hk">
+if (process.env.DATABASE_URL) {
+    usePostgres = true;
+    pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false }
+    });
+} else {
+    db = new sqlite3.Database('./read_aloud.db');
+}
 
-        <button id="startBtn" class="btn-start">🔴 Start Recording</button>
-        <button id="stopBtn" class="btn-stop" disabled>⏹️ Stop Recording</button>
-        <audio id="audioPreview" controls></audio>
-        
-        <button id="uploadBtn" class="btn-submit" disabled>⬆️ Submit Soundtrack</button>
-
-        <p id="status"></p>
-
-        <div id="scoreBox" class="score-box">
-            <div style="text-align: center; font-weight: bold; color: #2b6cb0;">🎯 Overall Pronunciation Score:</div>
-            <div id="scoreDisplay" class="score-number">0 / 100</div>
-
-            <div class="feedback-title">📝 Spoken Speech Recognized:</div>
-            <div id="transcriptDisplay" class="transcript-box"></div>
-
-            <div class="feedback-title">⚠️ Words Flagged for Practice:</div>
-            <div id="wordList"></div>
-
-            <div id="emailNote" class="email-note" style="display: none;">
-                📧 Your email has been saved for the weekly practice word summary.
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let mediaRecorder, audioChunks = [], audioBlob;
-        let recognition = null, spokenTranscript = "", committedTranscript = "";
-
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const uploadBtn = document.getElementById('uploadBtn');
-        const status = document.getElementById('status');
-        const audioPreview = document.getElementById('audioPreview');
-        const scoreBox = document.getElementById('scoreBox');
-        const scoreDisplay = document.getElementById('scoreDisplay');
-        const transcriptDisplay = document.getElementById('transcriptDisplay');
-        const wordList = document.getElementById('wordList');
-        const emailNote = document.getElementById('emailNote');
-
-        function initSpeechRecognition() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) return null;
-
-            const rec = new SpeechRecognition();
-            rec.continuous = true;
-            rec.interimResults = true;
-            rec.lang = 'en-US';
-
-            rec.onresult = (event) => {
-                let currentSessionFinal = "";
-                let currentSessionInterim = "";
-
-                for (let i = 0; i < event.results.length; i++) {
-                    const text = event.results[i][0].transcript;
-                    if (event.results[i].isFinal) {
-                        currentSessionFinal += text + " ";
-                    } else {
-                        currentSessionInterim += text + " ";
-                    }
-                }
-
-                spokenTranscript = (committedTranscript + " " + currentSessionFinal + currentSessionInterim).trim();
-                if (spokenTranscript) {
-                    status.textContent = `🎙️ Hearing: "${spokenTranscript.slice(-60)}"`;
-                }
-            };
-
-            rec.onend = () => {
-                // If still recording and browser auto-stopped recognition after a pause, save progress and restart
-                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                    committedTranscript = spokenTranscript;
-                    try { rec.start(); } catch (e) {}
-                }
-            };
-
-            return rec;
+// Configure Automated System Mailer (Gmail SMTP or any SMTP provider)
+let mailTransporter = null;
+if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    mailTransporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'smtp.gmail.com',
+        port: 587,
+        secure: false,
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
         }
+    });
+}
 
-        startBtn.onclick = async () => {
-            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-                alert('Microphone access requires HTTPS. Please access the website via https://');
-                return;
-            }
-
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alert('Microphone access is not supported by this browser. Please use Chrome or Safari.');
-                return;
-            }
-
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                
-                let options = {};
-                if (MediaRecorder.isTypeSupported('audio/webm')) {
-                    options = { mimeType: 'audio/webm' };
-                } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-                    options = { mimeType: 'audio/mp4' };
-                }
-
-                mediaRecorder = new MediaRecorder(stream, options);
-                audioChunks = [];
-                audioBlob = null;
-                spokenTranscript = "";
-                committedTranscript = "";
-
-                mediaRecorder.ondataavailable = e => {
-                    if (e.data.size > 0) audioChunks.push(e.data);
-                };
-
-                mediaRecorder.onstop = () => {
-                    audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-                    audioPreview.src = URL.createObjectURL(audioBlob);
-                    uploadBtn.disabled = false;
-                };
-
-                mediaRecorder.start();
-                recognition = initSpeechRecognition();
-                if (recognition) { try { recognition.start(); } catch(e){} }
-
-                status.textContent = '🎙️ Recording audio now... Speak clearly!';
-                scoreBox.style.display = 'none';
-                emailNote.style.display = 'none';
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-                uploadBtn.disabled = true;
-            } catch (err) {
-                alert('Microphone access denied or blocked. Please allow microphone permissions in your browser settings.');
-            }
-        };
-
-        stopBtn.onclick = () => {
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-            if (recognition) { try { recognition.stop(); } catch(e){} }
-
-            status.textContent = '⏹️ Recording finished. Preview below before submitting.';
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-        };
-
-        uploadBtn.onclick = async () => {
-            const studentId = document.getElementById('studentId').value;
-            const studentName = document.getElementById('studentName').value;
-            const studentEmail = document.getElementById('studentEmail').value;
-            
-            if (!studentId || !studentName) {
-                return alert('Please enter both your Student ID and Full Name!');
-            }
-
-            if (!audioBlob) {
-                return alert('Please record your voice first before submitting!');
-            }
-
-            const formData = new FormData();
-            formData.append('student_id', studentId);
-            formData.append('student_name', studentName);
-            formData.append('student_email', studentEmail);
-            formData.append('transcript', spokenTranscript);
-            formData.append('audio', audioBlob, 'recording.webm');
-
-            uploadBtn.disabled = true;
-            status.textContent = '⏳ Analyzing spoken words & calculating score...';
-            try {
-                const res = await fetch('/api/upload', { method: 'POST', body: formData });
-                const data = await res.json();
-
-                if (res.ok && data.success) {
-                    status.textContent = '✅ Submitted & Scored Successfully!';
-                    scoreDisplay.textContent = `${data.score} / 100`;
-                    transcriptDisplay.textContent = data.transcript || spokenTranscript || "(Speech captured as audio)";
-
-                    wordList.innerHTML = data.mispronounced.map((item, idx) => `
-                        <div class="word-item">
-                            ${idx + 1}. <span class="word-name">${item.word}</span><br>
-                            <small style="color: #4a5568;">💡 Note: ${item.issue}</small>
-                        </div>
-                    `).join('');
-
-                    if (studentEmail && studentEmail.includes('@')) {
-                        emailNote.style.display = 'block';
-                    }
-
-                    scoreBox.style.display = 'block';
-                } else {
-                    uploadBtn.disabled = false;
-                    status.textContent = `❌ Upload failed: ${data.error || 'Server Error'}`;
-                }
-            } catch (e) {
-                uploadBtn.disabled = false;
-                status.textContent = `❌ Network Error: ${e.message}`;
-            }
-        };
-
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js'); });
-        }
-    </script>
-</body>
-</html>
+async function initDB() {
+    if (usePostgres) {
+        try {
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS submissions (
+                    id SERIAL PRIMARY KEY,
+                    student_id INT NOT NULL,
+                    student_name VARCHAR(255) NOT NULL DEFAULT 'Unknown',
+                    student_email VARCHAR(255) DEFAULT '',
+                    audio_file_path TEXT NOT NULL,
+                    transcript TEXT DEFAULT '',
+                    score INT DEFAULT 0,
+                    mispronounced_words TEXT NOT NULL DEFAULT '',
+                    week_number INT NOT NULL,
+                    year INT NOT NULL,
+                    submitted_at TIMESTAMP DEFAULT
