@@ -31,7 +31,6 @@
         .word-item { background: white; margin: 6px 0; padding: 8px 10px; border-radius: 6px; border-left: 4px solid #e53e3e; font-size: 14px; }
         .word-name { font-weight: bold; color: #c53030; }
         .transcript-box { font-style: italic; background: #edf2f7; padding: 8px; border-radius: 6px; font-size: 13px; margin-top: 6px; }
-        .email-note { background: #edf2f7; color: #2d3748; padding: 8px 10px; border-radius: 6px; font-size: 12px; text-align: center; margin-top: 12px; }
     </style>
 </head>
 <body>
@@ -44,7 +43,7 @@
         <label for="studentName">Student Full Name:</label>
         <input type="text" id="studentName" placeholder="e.g. Chan Tai Man" required>
 
-        <label for="studentEmail">Student Email (Optional — for weekly word list):</label>
+        <label for="studentEmail">Student Email (Optional):</label>
         <input type="email" id="studentEmail" placeholder="e.g. s101@school.edu.hk">
 
         <button id="startBtn" class="btn-start">🔴 Start Recording</button>
@@ -64,10 +63,6 @@
 
             <div class="feedback-title">⚠️ Words Flagged for Practice:</div>
             <div id="wordList"></div>
-
-            <div id="emailNote" class="email-note" style="display: none;">
-                📧 Your email has been saved for the weekly practice word summary.
-            </div>
         </div>
     </div>
 
@@ -84,7 +79,6 @@
         const scoreDisplay = document.getElementById('scoreDisplay');
         const transcriptDisplay = document.getElementById('transcriptDisplay');
         const wordList = document.getElementById('wordList');
-        const emailNote = document.getElementById('emailNote');
 
         function initSpeechRecognition() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -115,7 +109,6 @@
             };
 
             rec.onend = () => {
-                // If still recording and browser auto-stopped recognition after a pause, save progress and restart
                 if (mediaRecorder && mediaRecorder.state === 'recording') {
                     committedTranscript = spokenTranscript;
                     try { rec.start(); } catch (e) {}
@@ -168,7 +161,6 @@
 
                 status.textContent = '🎙️ Recording audio now... Speak clearly!';
                 scoreBox.style.display = 'none';
-                emailNote.style.display = 'none';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 uploadBtn.disabled = true;
@@ -223,10 +215,6 @@
                             <small style="color: #4a5568;">💡 Note: ${item.issue}</small>
                         </div>
                     `).join('');
-
-                    if (studentEmail && studentEmail.includes('@')) {
-                        emailNote.style.display = 'block';
-                    }
 
                     scoreBox.style.display = 'block';
                 } else {
