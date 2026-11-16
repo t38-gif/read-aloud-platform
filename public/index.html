@@ -31,6 +31,7 @@
         .word-item { background: white; margin: 6px 0; padding: 8px 10px; border-radius: 6px; border-left: 4px solid #e53e3e; font-size: 14px; }
         .word-name { font-weight: bold; color: #c53030; }
         .transcript-box { font-style: italic; background: #edf2f7; padding: 8px; border-radius: 6px; font-size: 13px; margin-top: 6px; }
+        .email-note { background: #edf2f7; color: #2d3748; padding: 8px 10px; border-radius: 6px; font-size: 12px; text-align: center; margin-top: 12px; }
     </style>
 </head>
 <body>
@@ -42,6 +43,9 @@
 
         <label for="studentName">Student Full Name:</label>
         <input type="text" id="studentName" placeholder="e.g. Chan Tai Man" required>
+
+        <label for="studentEmail">Student Email (Optional — for weekly word list):</label>
+        <input type="email" id="studentEmail" placeholder="e.g. s101@school.edu.hk">
 
         <button id="startBtn" class="btn-start">🔴 Start Recording</button>
         <button id="stopBtn" class="btn-stop" disabled>⏹️ Stop Recording</button>
@@ -60,12 +64,16 @@
 
             <div class="feedback-title">⚠️ Words Flagged for Practice:</div>
             <div id="wordList"></div>
+
+            <div id="emailNote" class="email-note" style="display: none;">
+                📧 Your email has been saved for the weekly practice word summary.
+            </div>
         </div>
     </div>
 
     <script>
         let mediaRecorder, audioChunks = [], audioBlob;
-        let recognition = null, spokenTranscript = "";
+        let recognition = null, spokenTranscript = "", committedTranscript = "";
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -76,29 +84,73 @@
         const scoreDisplay = document.getElementById('scoreDisplay');
         const transcriptDisplay = document.getElementById('transcriptDisplay');
         const wordList = document.getElementById('wordList');
+        const emailNote = document.getElementById('emailNote');
 
-        try {
+        function initSpeechRecognition() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (SpeechRecognition) {
-                recognition = new SpeechRecognition();
-                recognition.continuous = true;
-                recognition.interimResults = false;
-                recognition.lang = 'en-US';
+            if (!SpeechRecognition) return null;
 
-                recognition.onresult = (event) => {
-                    spokenTranscript = Array.from(event.results)
-                        .map(result => result[0].transcript)
-                        .join(' ');
-                };
-            }
-        } catch (e) {}
+            const rec = new SpeechRecognition();
+            rec.continuous = true;
+            rec.interimResults = true;
+            rec.lang = 'en-US';
+
+            rec.onresult = (event) => {
+                let currentSessionFinal = "";
+                let currentSessionInterim = "";
+
+                for (let i = 0; i < event.results.length; i++) {
+                    const text = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        currentSessionFinal += text + " ";
+                    } else {
+                        currentSessionInterim += text + " ";
+                    }
+                }
+
+                spokenTranscript = (committedTranscript + " " + currentSessionFinal + currentSessionInterim).trim();
+                if (spokenTranscript) {
+                    status.textContent = `🎙️ Hearing: "${spokenTranscript.slice(-60)}"`;
+                }
+            };
+
+            rec.onend = () => {
+                // If still recording and browser auto-stopped recognition after a pause, save progress and restart
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    committedTranscript = spokenTranscript;
+                    try { rec.start(); } catch (e) {}
+                }
+            };
+
+            return rec;
+        }
 
         startBtn.onclick = async () => {
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                alert('Microphone access requires HTTPS. Please access the website via https://');
+                return;
+            }
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('Microphone access is not supported by this browser. Please use Chrome or Safari.');
+                return;
+            }
+
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
+                
+                let options = {};
+                if (MediaRecorder.isTypeSupported('audio/webm')) {
+                    options = { mimeType: 'audio/webm' };
+                } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                    options = { mimeType: 'audio/mp4' };
+                }
+
+                mediaRecorder = new MediaRecorder(stream, options);
                 audioChunks = [];
+                audioBlob = null;
                 spokenTranscript = "";
+                committedTranscript = "";
 
                 mediaRecorder.ondataavailable = e => {
                     if (e.data.size > 0) audioChunks.push(e.data);
@@ -111,14 +163,17 @@
                 };
 
                 mediaRecorder.start();
+                recognition = initSpeechRecognition();
                 if (recognition) { try { recognition.start(); } catch(e){} }
 
                 status.textContent = '🎙️ Recording audio now... Speak clearly!';
                 scoreBox.style.display = 'none';
+                emailNote.style.display = 'none';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
+                uploadBtn.disabled = true;
             } catch (err) {
-                alert('Microphone access denied or blocked.');
+                alert('Microphone access denied or blocked. Please allow microphone permissions in your browser settings.');
             }
         };
 
@@ -134,6 +189,7 @@
         uploadBtn.onclick = async () => {
             const studentId = document.getElementById('studentId').value;
             const studentName = document.getElementById('studentName').value;
+            const studentEmail = document.getElementById('studentEmail').value;
             
             if (!studentId || !studentName) {
                 return alert('Please enter both your Student ID and Full Name!');
@@ -146,9 +202,11 @@
             const formData = new FormData();
             formData.append('student_id', studentId);
             formData.append('student_name', studentName);
+            formData.append('student_email', studentEmail);
             formData.append('transcript', spokenTranscript);
             formData.append('audio', audioBlob, 'recording.webm');
 
+            uploadBtn.disabled = true;
             status.textContent = '⏳ Analyzing spoken words & calculating score...';
             try {
                 const res = await fetch('/api/upload', { method: 'POST', body: formData });
@@ -166,12 +224,17 @@
                         </div>
                     `).join('');
 
+                    if (studentEmail && studentEmail.includes('@')) {
+                        emailNote.style.display = 'block';
+                    }
+
                     scoreBox.style.display = 'block';
-                    uploadBtn.disabled = true;
                 } else {
+                    uploadBtn.disabled = false;
                     status.textContent = `❌ Upload failed: ${data.error || 'Server Error'}`;
                 }
             } catch (e) {
+                uploadBtn.disabled = false;
                 status.textContent = `❌ Network Error: ${e.message}`;
             }
         };
